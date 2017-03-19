@@ -1,0 +1,27 @@
+{
+    "bridge": {
+        "name": "Homebridge",
+        "username": "CC:22:3D:E3:CE:32",
+        "port": 51826,
+        "pin": "031-45-154"
+    },
+ 
+    "description": "Piface Digital output control",
+ 
+    "platforms": [{
+        "platform": "cmdSwitch2",
+        "name": "CMD Switch",
+        "switches": [{
+            "name" : "Led 1",
+            "on_cmd": "Piface.py led 1 on",
+            "off_cmd": "Piface.py led 1 off",
+            "state_cmd": "Piface.py led 1 status | grep 'output is on'"
+        },{
+	    "name" : "Led 2",
+	    "on_cmd": "Piface.py led 2 push",
+	    "off_cmd": "Piface.py led 2 push",
+	    "state_cmd": "Piface.py led 1 status | grep 'output is on'"
+	}]
+    }]
+}
+
