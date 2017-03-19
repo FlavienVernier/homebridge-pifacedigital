@@ -27,15 +27,17 @@ def handler(signum, frame):
         global running
 
         logger.info("Signal: " + str(signum) + " receved")
-        
-        running = False
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(("", 1114))
 
-        s.send(bytes("stop",'UTF-8'))
-        
-        s.close()
-                                                                                        
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:        
+                s.connect(("", 1114))
+
+                s.send(bytes("stop",'UTF-8'))
+        except Exception as e:
+                logger.error(e)
+        finally:
+                s.close()
+        #running = False                                                                                
 
 def exec_command(argv):  
         global logger
@@ -48,9 +50,9 @@ def exec_command(argv):
                 in_out_put = "output"
         elif in_out_put == "input" or in_out_put == "switche" and (pin_number == 0 or pin_number == 1 or pin_number == 2 or pin_number == 3):
                 in_out_put = "input"
-        elif in_out_put == "stop":
-                running = False
-                return "stopped"
+        #elif in_out_put == "stop":
+                #running = False
+                #return "stopped"
         else:
                 error_msg = "Piface in or output name: " + in_out_put + " does not exist"
                 logger.error(error_msg)
@@ -102,16 +104,11 @@ def exec_command(argv):
 
 write_lock = threading.Lock()
 
-def input_handle_client(event):
-        state = event.chip.input_pins[event.pin_num].value
-        write_lock.acquire()
-        clientsocket = inputs_com[str(event.pin_num)]
-        clientsocket.send(bytes(str(event.pin_num) + " " + state,'UTF-8'))
-        write_lock.release()
-
 def input_handle(event):
+        global logger
         state = event.chip.input_pins[event.pin_num].value
         write_lock.acquire()
+        logger.info("event: " + str(event.pin_num) + " " + str(state))
         for dest in inputs_com[event.pin_num]:
                 if dest is None:
                         sys.stdout.write('%s %s\n' % (event.pin_num, state))
@@ -141,6 +138,9 @@ def server(argv):
                         inputs = list(map(int, sys.argv[2:]))
                         for pin in inputs:
                                 inputs_com[pin].append(None)
+                elif argv[1] == "stop":
+                        running = False
+                        listener.deactivate()
                 else:
                         received = exec_command(argv)
                         print(received)
@@ -149,9 +149,10 @@ def server(argv):
         tcpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         tcpsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tcpsock.bind(("",1114))
-
+        tcpsock.listen(10)
+        
         while running:
-                tcpsock.listen(10)
+
                 logger.info( "waiting connection...")
 
                 (clientsocket, (ip, port)) = tcpsock.accept()
@@ -162,6 +163,12 @@ def server(argv):
                 argv = r.split()
                 
                 if argv[1] == "stop" :
+                        listener.deactivate()
+                        for pin in range(8):
+                                for dest in inputs_com[pin]:
+                                        if dest is not None:
+                                                dest.send(bytes("stop",'UTF-8'))
+                                              
                         running = False
                         ret = "stopped"
                 elif argv[1] == "inputs":
@@ -177,6 +184,7 @@ def server(argv):
 
 def client(argv):
         global logger
+        global running
         if len(argv) > 1 :
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect(("", 1114))
