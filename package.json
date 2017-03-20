@@ -1,0 +1,27 @@
+{
+  "name": "homebridge-pifacedigital",
+  "version": "1.0.0",
+  "description": "Piface Digital plugin for Homebridge",
+  "main": "pifacedigital.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/FlavienVernier/homebridge-pifacedigital.git"
+  },
+  "keywords": [
+    "homebridge-plugin",
+    "pifacedigital"
+  ],
+  "author": "FlavienVernier",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/FlavienVernier/homebridge-pifacedigital.git"
+  },
+  "engines": {
+    "node": ">=6.0.0",
+    "homebridge": ">=0.2.0"
+  },
+  "homepage": "https://github.com/FlavienVernier/homebridge-pifacedigital.git"
+}
