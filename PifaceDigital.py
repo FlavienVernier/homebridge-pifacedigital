@@ -21,23 +21,7 @@ listener = None
 inputs_com=[]
 for pin in range(8):
         inputs_com.append([])
-
-def handler(signum, frame):
-        global logger
-        global running
-
-        logger.info("Signal: " + str(signum) + " receved")
-
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:        
-                s.connect(("", 1114))
-
-                s.send(bytes("stop",'UTF-8'))
-        except Exception as e:
-                logger.error(e)
-        finally:
-                s.close()
-        #running = False                                                                                
+listener_sockets=[]
 
 def exec_command(argv):  
         global logger
@@ -132,6 +116,7 @@ def server(argv):
         listener.activate()
 
         global inputs_com
+        global listener_sockets
         
         if len(argv) > 1 :
                 if argv[1] == "inputs":
@@ -141,6 +126,7 @@ def server(argv):
                 elif argv[1] == "stop":
                         running = False
                         listener.deactivate()
+                        sys.exit()
                 else:
                         received = exec_command(argv)
                         print(received)
@@ -164,11 +150,10 @@ def server(argv):
                 
                 if argv[1] == "stop" :
                         listener.deactivate()
-                        for pin in range(8):
-                                for dest in inputs_com[pin]:
-                                        if dest is not None:
-                                                dest.send(bytes("stop",'UTF-8'))
-                                              
+                        for dest in listener_sockets:
+                                if dest is not None:
+                                        dest.send(bytes("stop",'UTF-8'))
+                                        logger.info("listener " + dest.recv(2048).decode('UTF-8'))
                         running = False
                         ret = "stopped"
                 elif argv[1] == "inputs":
@@ -176,11 +161,13 @@ def server(argv):
                         for pin in inputs:
                                 logger.info("add listener on pin: " + str(pin))
                                 inputs_com[pin].append(clientsocket)
+                        listener_sockets.append(clientsocket)
                         ret=""
                 else :
                         ret = exec_command(argv)
                 clientsocket.send(bytes(ret,'UTF-8'))
         tcpsock.close()
+        logger.info("done")
 
 def client(argv):
         global logger
@@ -197,9 +184,11 @@ def client(argv):
                         received = s.recv(2048).decode('UTF-8')
                         logger.info(received)
                         print(received)
-                        if argv[1] != "inputs" or received == "stopped":
+                        if argv[1] != "inputs":
                                 running = False
-                
+                        elif received == "stop":
+                                running = False
+                                s.send(bytes("stopped",'UTF-8'))
                 s.close()
         else:
                 logger.error("NO Arument !!!")
@@ -221,16 +210,15 @@ def main(argv):
         logger.setLevel(logging.DEBUG)
         
         if os.path.isfile(pidfile):
-                formatter = logging.Formatter('CLIENT :: %(asctime)s :: %(levelname)s :: %(message)s')
+                formatter = logging.Formatter('CLIENT ' + pid + ':: %(asctime)s :: %(levelname)s :: %(message)s')
                 init_logger(logger, formatter, logFileName)
                 logger.info("connect to server " + argv[0] +" running on " + pidfile)
                 client(argv)
         else:
-                formatter = logging.Formatter('SERVER :: %(asctime)s :: %(levelname)s :: %(message)s')
+                formatter = logging.Formatter('SERVER ' + pid + ' :: %(asctime)s :: %(levelname)s :: %(message)s')
                 init_logger(logger, formatter, logFileName)
                 open(pidfile, 'w').write(pid)
                 try:
-                        signal.signal(signal.SIGTERM, handler)
                         logger.info("launch server " + argv[0] +" running on " + pidfile)
                         server(argv)
                 finally:
