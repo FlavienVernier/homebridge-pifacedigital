@@ -15,6 +15,8 @@ function PifaceDigital(log, config, api) {
     this.config = config || {"platform": "PifaceDigital"};
     this.switches = this.config.switches || [];
 
+    this.sensors = this.config.sensors || [];
+    
     this.accessories = {};
     this.polling = {};
 
@@ -33,8 +35,10 @@ PifaceDigital.prototype.configureAccessory = function (accessory) {
 // Method to setup accesories from config.json
 PifaceDigital.prototype.didFinishLaunching = function () {
     // Add or update accessories defined in config.json
-    for (var i in this.switches) this.addAccessory(this.switches[i]);
+    for (var i in this.switches) this.addAccessory(this.switches[i], "Switch");
 
+    for (var i in this.sensors) this.addAccessory(this.sensors[i], "Sensor");
+    
     // Remove extra accessories in cache
     for (var name in this.accessories) {
 	var accessory = this.accessories[name];
@@ -43,7 +47,7 @@ PifaceDigital.prototype.didFinishLaunching = function () {
 }
 
 // Method to add and update HomeKit accessories
-PifaceDigital.prototype.addAccessory = function (data) {
+PifaceDigital.prototype.addAccessory = function (data, type) {
     this.log("Initializing platform accessory '" + data.name + "'...");
 
     // Retrieve accessory from cache
@@ -54,8 +58,13 @@ PifaceDigital.prototype.addAccessory = function (data) {
 	var uuid = UUIDGen.generate(data.name);
 	accessory = new Accessory(data.name, uuid, 8);
 
-	// Setup HomeKit switch service
-	accessory.addService(Service.Switch, data.name);
+	if(type === "Switch"){
+	    // Setup HomeKit switch service
+	    accessory.addService(Service.Switch, data.name);
+	}else{
+	    // Setup HomeKit sensor service
+	    accessory.addService(Service.ContactSensor, data.name);
+	}
 
 	// New accessory is always reachable
 	accessory.reachable = true;
@@ -116,12 +125,17 @@ PifaceDigital.prototype.removeAccessory = function (accessory) {
 
 // Method to setup listeners for different events
 PifaceDigital.prototype.setService = function (accessory) {
-    accessory.getService(Service.Switch)
-	.getCharacteristic(Characteristic.On)
-	.on('get', this.getPowerState.bind(this, accessory.context))
-	.on('set', this.setPowerState.bind(this, accessory.context));
+    if(accessory.getService(Service.Switch)){
+	accessory.getService(Service.Switch)
+	    .getCharacteristic(Characteristic.On)
+	    .on('get', this.getSwitchPowerState.bind(this, accessory.context))
+	    .on('set', this.setSwitchPowerState.bind(this, accessory.context));
 
-    accessory.on('identify', this.identify.bind(this, accessory.context));
+	accessory.on('identify', this.identify.bind(this, accessory.context));
+    }else if (accessory.getService(Service.ContactSensor)){
+	this.log(accessory)
+	// ToDo
+    }	
 }
 
 // Method to retrieve initial state
@@ -138,9 +152,11 @@ PifaceDigital.prototype.getInitState = function (accessory) {
 
     // Retrieve initial state if polling is disabled
     if (!accessory.context.polling) {
-	accessory.getService(Service.Switch)
-	    .getCharacteristic(Characteristic.On)
-	    .getValue();
+	if(accessory.getService(Service.Switch)){
+	    accessory.getService(Service.Switch)
+		.getCharacteristic(Characteristic.On)
+		.getValue();
+	}
     }
 
     // Configured accessory is reachable
@@ -188,7 +204,7 @@ PifaceDigital.prototype.statePolling = function (name) {
 }
 
 // Method to determine current state
-PifaceDigital.prototype.getPowerState = function (thisSwitch, callback) {
+PifaceDigital.prototype.getSwitchPowerState = function (thisSwitch, callback) {
     var self = this;
 
     if (thisSwitch.polling) {
@@ -207,7 +223,7 @@ PifaceDigital.prototype.getPowerState = function (thisSwitch, callback) {
 }
 
 // Method to set state
-PifaceDigital.prototype.setPowerState = function (thisSwitch, state, callback) {
+PifaceDigital.prototype.setSwitchPowerState = function (thisSwitch, state, callback) {
     var self = this;
 
     var cmd = state ? thisSwitch.on_cmd : thisSwitch.off_cmd;
@@ -360,6 +376,10 @@ PifaceDigital.prototype.configurationRequestHandler = function (context, request
 		    "interface": "input",
 		    "title": data.name,
 		    "items": [{
+			"id": "pin",
+			"titlz": "Pin number [0..7]",
+			"placeholder": context.operation ? "Leave blank if unchanged" : "X"
+		    },{
 			"id": "on_cmd",
 			"title": "CMD to Turn On",
 			"placeholder": context.operation ? "Leave blank if unchanged" : "PifaceDigital.py input|output X on"
@@ -438,7 +458,7 @@ PifaceDigital.prototype.configurationRequestHandler = function (context, request
             newSwitch.serial = userInputs.serial;
 
             // Register or update accessory in HomeKit
-            this.addAccessory(newSwitch);
+            this.addAccessory(newSwitch, "Switch");
             var respDict = {
 		"type": "Interface",
 		"interface": "instruction",
