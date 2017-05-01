@@ -28,14 +28,14 @@ class PifaceDigitalPlugin
 
     this.pin2contact = {};
     this.contacts = [];
-    const helperPath = path.join(__dirname, 'pifacedigital.py');
-    const args = ['-u', helperPath];
+    const helperPath = path.join(__dirname, 'PifaceDigital.py');
+    const args = ['-u', helperPath, 'inputs'];
 
     for (let name of Object.keys(this.pins)) {
       const pin = this.pins[name];
 
       const subtype = name; 
-      const contact = new Service.PifaceDigital(name, subtype);
+      const contact = Service.ContactSensor(name, subtype);
       contact
         .getCharacteristic(Characteristic.PifaceDigitalState)
         .setValue(false);

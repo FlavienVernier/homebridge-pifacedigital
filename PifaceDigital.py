@@ -201,10 +201,18 @@ def init_logger(logger, formatter, logFileName):
                                         
         
 def main(argv):
-        pid = str(os.getpid())
-        pidfile = "/tmp/mydaemon.pid"
+        execName = os.path.basename(argv[0])
 
-        logFileName = argv[0] + ".log"
+        pid = str(os.getpid())
+        pidfile = "/tmp/" + execName + ".pid"
+
+        if len(argv) > 1 and argv[1] == "clean":
+                open(pidfile, 'w')
+                os.unlink(pidfile)
+                os.system("killall -9 " + execName)
+                sys.exit(0)
+
+        logFileName = "/tmp/" + execName + ".log"
         global logger
         logger =logging.getLogger()
         logger.setLevel(logging.DEBUG)

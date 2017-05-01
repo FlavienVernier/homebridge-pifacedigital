@@ -1,521 +1,159 @@
 var exec = require("child_process").exec;
-var Accessory, Service, Characteristic, UUIDGen;
 
-module.exports = function (homebridge) {
-    Accessory = homebridge.platformAccessory;
+const path = require('path');
+const child_process = require('child_process');
+
+var Service, Characteristic;
+
+module.exports = function(homebridge) {
     Service = homebridge.hap.Service;
     Characteristic = homebridge.hap.Characteristic;
-    UUIDGen = homebridge.hap.uuid;
-
-    homebridge.registerPlatform("homebridge-pifacedigital", "PifaceDigital", PifaceDigital, true);
+    //UUIDGen = homebridge.hap.uuid;
+    
+    homebridge.registerAccessory('homebridge-pifacedigital', 'PifaceDigital', PifaceDigitalAccessory);
 }
 
-function PifaceDigital(log, config, api) {
+function PifaceDigitalAccessory(log, config) {
     this.log = log;
     this.config = config || {"platform": "PifaceDigital"};
-    this.switches = this.config.switches || [];
 
-    this.sensors = this.config.sensors || [];
-    
-    this.accessories = {};
-    this.polling = {};
+    this.name = config['name'];
+    this.pin = config['pin'];
+    this.io = config['io'];
+    this.duration = config['duration'];
 
-    if (api) {
-	this.api = api;
-	this.api.on('didFinishLaunching', this.didFinishLaunching.bind(this));
+    if (this.io == "output"){
+	this.log("add Switch " + this.name + " on pin " + this.pin );
+
+	this.service = new Service.Switch(this.name, this.name);
+	
+	this.service
+            .getCharacteristic(Characteristic.On)
+            .on('get', this.getOn.bind(this))
+            .on('set', this.setOn.bind(this));
+    }else if (this.io == "input"){
+	this.log("add Contact " + this.name + " on pin " + this.pin );
+
+	this.service = new Service.ContactSensor(this.name, this.name);
+	
+	this.service
+	    .getCharacteristic(Characteristic.ContactSensorState)
+	    .setValue(false);
+	
+	
+	const cmpPath = path.join(__dirname, 'PifaceDigital.py');
+	const extCommand = ['-u', cmpPath, 'inputs', this.pin];
+	
+	this.log("Cmd input sensor: ", extCommand);
+	this.helper = child_process.spawn('python3', extCommand);
+	
+	this.helper.stderr.on('data', (err) => {
+	    throw new Error( `pifacedigital helper error: ${err})` );
+	});
+
+        this.helper.stdout.on('data', (data) => {
+	    console.log(`data = |${data}|`);
+	    const lines = data.toString().trim().split('\n');
+	    for (let line of lines) {
+		let [pin, state] = line.trim().split(' ');
+		pin = parseInt(pin, 10);
+		state = !!parseInt(state, 10);
+		this.log("pin " + pin + " changed state to " + state);
+
+		this.service
+		    .getCharacteristic(Characteristic.ContactSensorState)
+		    .setValue(state);
+	    }
+	});
     }
 }
 
-// Method to restore accessories from cache
-PifaceDigital.prototype.configureAccessory = function (accessory) {
-    this.setService(accessory);
-    this.accessories[accessory.context.name] = accessory;
+PifaceDigitalAccessory.prototype.getServices = function() {
+    return [this.service];
 }
 
-// Method to setup accesories from config.json
-PifaceDigital.prototype.didFinishLaunching = function () {
-    // Add or update accessories defined in config.json
-    for (var i in this.switches) this.addAccessory(this.switches[i], "Switch");
-
-    for (var i in this.sensors) this.addAccessory(this.sensors[i], "Sensor");
-    
-    // Remove extra accessories in cache
-    for (var name in this.accessories) {
-	var accessory = this.accessories[name];
-	if (!accessory.reachable) this.removeAccessory(accessory);
-    }
-}
-
-// Method to add and update HomeKit accessories
-PifaceDigital.prototype.addAccessory = function (data, type) {
-    this.log("Initializing platform accessory '" + data.name + "'...");
-
-    // Retrieve accessory from cache
-    var accessory = this.accessories[data.name];
-
-    if (!accessory) {
-	// Setup accessory as SWITCH (8) category.
-	var uuid = UUIDGen.generate(data.name);
-	accessory = new Accessory(data.name, uuid, 8);
-
-	if(type === "Switch"){
-	    // Setup HomeKit switch service
-	    accessory.addService(Service.Switch, data.name);
-	}else{
-	    // Setup HomeKit sensor service
-	    accessory.addService(Service.ContactSensor, data.name);
-	}
-
-	// New accessory is always reachable
-	accessory.reachable = true;
-
-	// Setup listeners for different switch events
-	this.setService(accessory);
-
-	// Register new accessory in HomeKit
-	this.api.registerPlatformAccessories("homebridge-pifacedigital", "PifaceDigital", [accessory]);
-
-	// Store accessory in cache
-	this.accessories[data.name] = accessory;
-    }
-
-    // Confirm variable type
-    data.polling = data.polling === true;
-    data.interval = parseInt(data.interval, 10) || 1;
-    if (data.manufacturer) data.manufacturer = data.manufacturer.toString();
-    if (data.model) data.model = data.model.toString();
-    if (data.serial) data.serial = data.serial.toString();
-
-    // Store and initialize variables into context
-    var cache = accessory.context;
-    cache.name = data.name;
-    cache.pin = data.pin;
-    //cache.on_cmd = data.on_cmd;
-    cache.on_cmd = "PifaceDigital.py output " + cache.pin + " on";
-    //cache.off_cmd = data.off_cmd;
-    cache.off_cmd = "PifaceDigital.py output " + cache.pin + " off";
-    //cache.state_cmd = data.state_cmd;
-    cache.state_cmd = "PifaceDigital.py output " + cache.pin + " status | grep 'output is on'";
-    cache.polling = data.polling;
-    cache.interval = data.interval;
-    cache.manufacturer = data.manufacturer;
-    cache.model = data.model;
-    cache.serial = data.serial;
-    if (cache.state === undefined) {
-	cache.state = false;
-	if (data.off_cmd && !data.on_cmd) cache.state = true;
-    }
-
-    // Retrieve initial state
-    this.getInitState(accessory);
-
-    // Configure state polling
-    if (data.polling && data.state_cmd) this.statePolling(data.name);
-}
-
-// Method to remove accessories from HomeKit
-PifaceDigital.prototype.removeAccessory = function (accessory) {
-    if (accessory) {
-	var name = accessory.context.name;
-	this.log(name + " is removed from HomeBridge.");
-	this.api.unregisterPlatformAccessories("homebridge-pifacedigital", "PifaceDigital", [accessory]);
-	delete this.accessories[name];
-    }
-}
-
-// Method to setup listeners for different events
-PifaceDigital.prototype.setService = function (accessory) {
-    if(accessory.getService(Service.Switch)){
-	accessory.getService(Service.Switch)
-	    .getCharacteristic(Characteristic.On)
-	    .on('get', this.getSwitchPowerState.bind(this, accessory.context))
-	    .on('set', this.setSwitchPowerState.bind(this, accessory.context));
-
-	accessory.on('identify', this.identify.bind(this, accessory.context));
-    }else if (accessory.getService(Service.ContactSensor)){
-	this.log(accessory)
-	// ToDo
-    }	
-}
-
-// Method to retrieve initial state
-PifaceDigital.prototype.getInitState = function (accessory) {
-    var manufacturer = accessory.context.manufacturer || "Default-Manufacturer";
-    var model = accessory.context.model || "Default-Model";
-    var serial = accessory.context.serial || "Default-SerialNumber";
-
-    // Update HomeKit accessory information
-    accessory.getService(Service.AccessoryInformation)
-	.setCharacteristic(Characteristic.Manufacturer, manufacturer)
-	.setCharacteristic(Characteristic.Model, model)
-	.setCharacteristic(Characteristic.SerialNumber, serial);
-
-    // Retrieve initial state if polling is disabled
-    if (!accessory.context.polling) {
-	if(accessory.getService(Service.Switch)){
-	    accessory.getService(Service.Switch)
-		.getCharacteristic(Characteristic.On)
-		.getValue();
-	}
-    }
-
-    // Configured accessory is reachable
-    accessory.updateReachability(true);
-}
-
-// Method to determine current state
-PifaceDigital.prototype.getState = function (thisSwitch, callback) {
+PifaceDigitalAccessory.prototype.getOn = function(callback) {
     var self = this;
-
+    var state_cmd = "PifaceDigital.py output " + this.pin + " status | grep 'output is on'";
+    
+    this.log(state_cmd);
+    
     // Execute command to detect state
-    exec(thisSwitch.state_cmd, function (error, stdout, stderr) {
+    exec(state_cmd, function (error, stdout, stderr) {
 	var state = error ? false : true;
 
 	// Error detection
 	if (stderr) {
-	    self.log("Failed to determine " + thisSwitch.name + " state.");
+	    self.log("Failed to determine " + this.name + " state.");
 	    self.log(stderr);
 	}
 
 	callback(stderr, state);
     });
-}
-
-// Method to determine current state
-PifaceDigital.prototype.statePolling = function (name) {
-    var accessory = this.accessories[name];
-    var thisSwitch = accessory.context;
-
-    // Clear polling
-    clearTimeout(this.polling[name]);
-
-    this.getState(thisSwitch, function (error, state) {
-	// Update state if there's no error
-	if (!error && state !== thisSwitch.state) {
-	    thisSwitch.state = state;
-	    accessory.getService(Service.Switch)
-		.getCharacteristic(Characteristic.On)
-		.getValue();
+    
+    /*gpio.read(this.pin, function(err, value) {
+	if (err) {
+	    callback(err);
+	} else {
+	    var on = value;
+	    callback(null, on);
 	}
-    });
-
-    // Setup for next polling
-    this.polling[name] = setTimeout(this.statePolling.bind(this, name), thisSwitch.interval * 1000);
+    });*/
 }
 
-// Method to determine current state
-PifaceDigital.prototype.getSwitchPowerState = function (thisSwitch, callback) {
-    var self = this;
-
-    if (thisSwitch.polling) {
-	// Get state directly from cache if polling is enabled
-	this.log(thisSwitch.name + " is " + (thisSwitch.state ? "on." : "off."));
-	callback(null, thisSwitch.state);
+PifaceDigitalAccessory.prototype.setOn = function(on, callback) {
+    if (on) {
+	this.pinAction(0);
+	if (is_defined(this.duration) && is_int(this.duration)) {
+	    this.pinTimer()
+	}
+	callback(null);
     } else {
-	// Check state if polling is disabled
-	this.getState(thisSwitch, function (error, state) {
-	    // Update state if command exists
-	    if (thisSwitch.state_cmd) thisSwitch.state = state;
-	    if (!error) self.log(thisSwitch.name + " is " + (thisSwitch.state ? "on." : "off."));
-	    callback(error, thisSwitch.state);
-	});
+	this.pinAction(1);
+	callback(null);
     }
 }
 
-// Method to set state
-PifaceDigital.prototype.setSwitchPowerState = function (thisSwitch, state, callback) {
+PifaceDigitalAccessory.prototype.pinAction = function(action) {
+    this.log('Turning ' + (action == 0 ? 'on' : 'off') + ' pin #' + this.pin);
+
+    var onoff_cmd = "PifaceDigital.py output " + this.pin + " " + (action == 0 ? 'on' : 'off');
+    
     var self = this;
-
-    var cmd = state ? thisSwitch.on_cmd : thisSwitch.off_cmd;
-    var notCmd = state ? thisSwitch.off_cmd : thisSwitch.on_cmd;
-    var tout = null;
-
     // Execute command to set state
-    exec(cmd, function (error, stdout, stderr) {
+    exec(onoff_cmd, function (error, stdout, stderr){
+	self.log("stdout: " + stdout);
 	// Error detection
-	if (error && (state !== thisSwitch.state)) {
-	    self.log("Failed to turn " + (state ? "on " : "off ") + thisSwitch.name);
+	if (error) {
+	    self.log("Failed to turn " + (action == 0 ? "on " : "off ") + thisSwitch.name);
 	    self.log(stderr);
 	} else {
-	    if (cmd) self.log(thisSwitch.name + " is turned " + (state ? "on." : "off."));
-	    thisSwitch.state = state;
+	    if (onoff_cmd)
+		self.log(self.name + " is turned " + (action == 0 ? "on." : "off."));
+	    //thisSwitch.state = state;
 	    error = null;
 	}
-
-	// Restore switch after 1s if only one command exists
-	if (!notCmd && !thisSwitch.state_cmd) {
-	    setTimeout(function () {
-		self.accessories[thisSwitch.name].getService(Service.Switch)
-		    .setCharacteristic(Characteristic.On, !state);
-	    }, 1000);
-	}
-
-	if (tout) {
-	    clearTimeout(tout);
-	    callback(error);
-	}
     });
-
-    // Allow 1s to set state but otherwise assumes success
-    tout = setTimeout(function () {
-	tout = null;
-	self.log("Turning " + (state ? "on " : "off ") + thisSwitch.name + " took too long, assuming success." );
-	callback();
-    }, 1000);
+    return true;
+    /*gpio.open(self.pin, 'output', function() {
+	gpio.write(self.pin, action, function() {
+	    gpio.close(self.pin);
+	    return true;
+	});
+    });*/
 }
 
-// Method to handle identify request
-PifaceDigital.prototype.identify = function (thisSwitch, paired, callback) {
-    this.log(thisSwitch.name + " identify requested!");
-    callback();
+PifaceDigitalAccessory.prototype.pinTimer = function() {
+    var self = this;
+    setTimeout(function() {
+	self.pinAction(1);
+    }, this.duration);
 }
 
-// Method to handle plugin configuration in HomeKit app
-PifaceDigital.prototype.configurationRequestHandler = function (context, request, callback) {
-    if (request && request.type === "Terminate") {
-	return;
-    }
+var is_int = function(n) {
+    return n % 1 === 0;
+}
 
-    // Instruction
-    if (!context.step) {
-	var instructionResp = {
-	    "type": "Interface",
-	    "interface": "instruction",
-	    "title": "Before You Start...",
-	    "detail": "Please make sure homebridge is running with elevated privileges.",
-	    "showNextButton": true
-	}
-
-	context.step = 1;
-	callback(instructionResp);
-    } else {
-	switch (context.step) {
-	case 1:
-            // Operation choices
-            var respDict = {
-		"type": "Interface",
-		"interface": "list",
-		"title": "What do you want to do?",
-		"items": [
-		    "Add New Switch",
-		    "Modify Existing Switch",
-		    "Remove Existing Switch"
-		]
-            }
-
-            context.step = 2;
-            callback(respDict);
-            break;
-	case 2:
-            var selection = request.response.selections[0];
-            if (selection === 0) {
-		// Info for new accessory
-		var respDict = {
-		    "type": "Interface",
-		    "interface": "input",
-		    "title": "New Switch",
-		    "items": [{
-			"id": "name",
-			"title": "Name (Required)",
-			"placeholder": "HTPC"
-		    }]
-		};
-
-		context.operation = 0;
-		context.step = 3;
-		callback(respDict);
-            } else {
-		var names = Object.keys(this.accessories);
-
-		if (names.length > 0) {
-		    // Select existing accessory for modification or removal
-		    if (selection === 1) {
-			var title = "Witch switch do you want to modify?";
-			context.operation = 1;
-			context.step = 3;
-		    } else {
-			var title = "Witch switch do you want to remove?";
-			context.step = 5;
-		    }
-
-		    var respDict = {
-			"type": "Interface",
-			"interface": "list",
-			"title": title,
-			"items": names
-		    };
-
-		    context.list = names;
-		} else {
-		    // Error if not switch is configured
-		    var respDict = {
-			"type": "Interface",
-			"interface": "instruction",
-			"title": "Unavailable",
-			"detail": "No switch is configured.",
-			"showNextButton": true
-		    };
-
-		    context.step = 1;
-		}
-		callback(respDict);
-            }
-            break;
-	case 3:
-            if (context.operation === 0) {
-		var data = request.response.inputs;
-            } else if (context.operation === 1) {
-		var selection = context.list[request.response.selections[0]];
-		var data = this.accessories[selection].context;
-            }
-            
-            if (data.name) {
-		// Add/Modify info of selected accessory
-		var respDict = {
-		    "type": "Interface",
-		    "interface": "input",
-		    "title": data.name,
-		    "items": [{
-			"id": "pin",
-			"titlz": "Pin number [0..7]",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "X"
-		    },{
-			"id": "on_cmd",
-			"title": "CMD to Turn On",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "PifaceDigital.py input|output X on"
-		    }, {
-			"id": "off_cmd",
-			"title": "CMD to Turn Off",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "PifaceDigital.py input|output X off"
-		    }, {
-			"id": "state_cmd",
-			"title": "CMD to Check ON State",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "PifaceDigital.py input|output X status | grep 'output is on'"
-		    }, {
-			"id": "polling",
-			"title": "Enable Polling (true/false)",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "false"
-		    }, {
-			"id": "interval",
-			"title": "Polling Interval",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "1"
-		    }, {
-			"id": "manufacturer",
-			"title": "Manufacturer",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "Default-Manufacturer"
-		    }, {
-			"id": "model",
-			"title": "Model",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "Default-Model"
-		    }, {
-			"id": "serial",
-			"title": "Serial",
-			"placeholder": context.operation ? "Leave blank if unchanged" : "Default-SerialNumber"
-		    }]
-		};
-
-		context.name = data.name;
-		context.step = 4;
-            } else {
-		// Error if required info is missing
-		var respDict = {
-		    "type": "Interface",
-		    "interface": "instruction",
-		    "title": "Error",
-		    "detail": "Name of the switch is missing.",
-		    "showNextButton": true
-		};
-		
-		context.step = 1;
-            }
-
-            delete context.list;
-            delete context.operation;
-            callback(respDict);
-            break;
-	case 4:
-            var userInputs = request.response.inputs;
-            var newSwitch = {};
-	    
-            // Clone context if switch exists
-            if (this.accessories[context.name]) {
-		newSwitch = JSON.parse(JSON.stringify(this.accessories[context.name].context));
-            }
-
-            // Setup input for addAccessory
-            newSwitch.name = context.name;
-            newSwitch.on_cmd = userInputs.on_cmd || newSwitch.on_cmd;
-            newSwitch.off_cmd = userInputs.off_cmd || newSwitch.off_cmd;
-            newSwitch.state_cmd = userInputs.state_cmd || newSwitch.state_cmd;
-            if (userInputs.polling.toUpperCase() === "TRUE") {
-		newSwitch.polling = true;
-            } else if (userInputs.polling.toUpperCase() === "FALSE") {
-		newSwitch.polling = false;
-            }
-            newSwitch.interval = userInputs.interval || newSwitch.interval;
-            newSwitch.manufacturer = userInputs.manufacturer;
-            newSwitch.model = userInputs.model;
-            newSwitch.serial = userInputs.serial;
-
-            // Register or update accessory in HomeKit
-            this.addAccessory(newSwitch, "Switch");
-            var respDict = {
-		"type": "Interface",
-		"interface": "instruction",
-		"title": "Success",
-		"detail": "The new switch is now updated.",
-		"showNextButton": true
-            };
-
-            context.step = 6;
-            callback(respDict);
-            break;
-	case 5:
-            // Remove selected accessory from HomeKit
-            var selection = context.list[request.response.selections[0]];
-            var accessory = this.accessories[selection];
-
-            this.removeAccessory(accessory);
-            var respDict = {
-		"type": "Interface",
-		"interface": "instruction",
-		"title": "Success",
-		"detail": "The switch is now removed.",
-		"showNextButton": true
-            };
-
-            delete context.list;
-            context.step = 6;
-            callback(respDict);
-            break;
-	case 6:
-            // Update config.json accordingly
-            var self = this;
-            delete context.step;
-            var newConfig = this.config;
-
-            // Create config for each switch
-            var newSwitches = Object.keys(this.accessories).map(function (k) {
-		var accessory = self.accessories[k];
-		var data = {
-		    'name': accessory.context.name,
-		    'pin' : accessory.context.pin,
-		    'on_cmd': accessory.context.on_cmd,
-		    'off_cmd': accessory.context.off_cmd,
-		    'state_cmd': accessory.context.state_cmd,
-		    'polling': accessory.context.polling,
-		    'interval': accessory.context.interval,
-		    'manufacturer': accessory.context.manufacturer,
-		    'model': accessory.context.model,
-		    'serial': accessory.context.serial
-		};
-
-		return data;
-            });
-
-            newConfig.switches = newSwitches;
-            callback(null, "platform", true, newConfig);
-            break;
-	}
-    }
+var is_defined = function(v) {
+    return typeof v !== 'undefined';
 }
