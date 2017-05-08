@@ -1,5 +1,7 @@
 #!/bin/sh
 
+cp PifaceDigital.py /usr/local/bin
+
 useradd --system pifacedigital
 usermod -a -G spi pifacedigital
 usermod -a -G gpio pifacedigital

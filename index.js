@@ -41,7 +41,8 @@ function PifaceDigitalAccessory(log, config) {
 	    .setValue(false);
 	
 	
-	const cmpPath = path.join(__dirname, 'PifaceDigital.py');
+	//const cmpPath = path.join(__dirname, 'PifaceDigital.py');
+	const cmpPath = path.join('/usr/local/bin/', 'PifaceDigital.py');
 	const extCommand = ['-u', cmpPath, 'inputs', this.pin];
 	
 	this.log("Cmd input sensor: ", extCommand);
@@ -57,12 +58,14 @@ function PifaceDigitalAccessory(log, config) {
 	    for (let line of lines) {
 		let [pin, state] = line.trim().split(' ');
 		pin = parseInt(pin, 10);
-		state = !!parseInt(state, 10);
-		this.log("pin " + pin + " changed state to " + state);
+		if (!isNaN(pin)){
+		    state = !!parseInt(state, 10);
+		    this.log("pin " + pin + " changed state to " + state);
 
-		this.service
-		    .getCharacteristic(Characteristic.ContactSensorState)
-		    .setValue(state);
+		    this.service
+			.getCharacteristic(Characteristic.ContactSensorState)
+			.setValue(state);
+		}
 	    }
 	});
     }

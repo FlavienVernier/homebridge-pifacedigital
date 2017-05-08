@@ -3,15 +3,15 @@ Description=PifaceDigital Daemon
 After=syslog.target network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 User=pifacedigital
 EnvironmentFile=/etc/default/pifacedigital
 # Adapt this to your specific setup (could be /usr/bin/pifacedigital)
 # See comments below for more information
 ExecStart=/usr/local/bin/PifaceDigital.py $PIFACEDIGITAL_OPTS
-Restart=on-failure
-RestartSec=10
-KillMode=process
+#Restart=on-failure
+#RestartSec=10
+#KillMode=process
 
 [Install]
 WantedBy=multi-user.target

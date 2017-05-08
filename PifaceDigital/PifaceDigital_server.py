@@ -87,6 +87,8 @@ def exec_command(argv):
                         logger.error(error_msg)
                         return(error_msg)
 
+        return("Unknown error in command " + argv)
+
 write_lock = threading.Lock()
 
 def input_handle(event):
@@ -102,7 +104,8 @@ def input_handle(event):
                         dest.send(bytes(str(event.pin_num) + " " + str(state),'UTF-8'))
         write_lock.release()
                 
-def server(argv):
+#def server(argv):
+def server(port):
         global logger
         global running
 
@@ -119,23 +122,23 @@ def server(argv):
         global inputs_com
         global listener_sockets
         
-        if len(argv) > 1 :
-                if argv[1] == "inputs":
-                        inputs = list(map(int, sys.argv[2:]))
-                        for pin in inputs:
-                                inputs_com[pin].append(None)
-                elif argv[1] == "stop":
-                        running = False
-                        listener.deactivate()
-                        sys.exit()
-                else:
-                        received = exec_command(argv)
-                        print(received)
-                        logger.info(received)
+        # if len(argv) > 1 :
+        #         if argv[1] == "inputs":
+        #                 inputs = list(map(int, sys.argv[2:]))
+        #                 for pin in inputs:
+        #                         inputs_com[pin].append(None)
+        #         elif argv[1] == "stop":
+        #                 running = False
+        #                 listener.deactivate()
+        #                 sys.exit()
+        #         else:
+        #                 received = exec_command(argv)
+        #                 print(received)
+        #                 logger.info(received)
 
         tcpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         tcpsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        tcpsock.bind(("",1114))
+        tcpsock.bind(("",port))
         tcpsock.listen(10)
         
         while running:
@@ -170,29 +173,6 @@ def server(argv):
         tcpsock.close()
         logger.info("done")
 
-def client(argv):
-        global logger
-        global running
-        if len(argv) > 1 :
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.connect(("", 1114))
-
-                logger.info("send: " + " ".join(argv))
-                s.send(bytes(" ".join(argv),'UTF-8'))
-
-                running = True
-                while running:
-                        received = s.recv(2048).decode('UTF-8')
-                        logger.info(received)
-                        print(received)
-                        if argv[1] != "inputs":
-                                running = False
-                        elif received == "stop":
-                                running = False
-                                s.send(bytes("stopped",'UTF-8'))
-                s.close()
-        else:
-                logger.error("NO Arument !!!")
 
 def init_logger(logger, formatter, logFileName):
         file_handler = RotatingFileHandler(logFileName, 'a', 1000000, 1)
@@ -228,20 +208,15 @@ def main(argv):
         logger =logging.getLogger()
         logger.setLevel(logging.DEBUG)
         
-        if os.path.isfile(pidfile):
-                formatter = logging.Formatter('CLIENT ' + pid + ':: %(asctime)s :: %(levelname)s :: %(message)s')
-                init_logger(logger, formatter, logFileName)
-                logger.info("connect to server " + argv[0] +" running on " + pidfile)
-                client(argv)
-        else:
-                formatter = logging.Formatter('SERVER ' + pid + ' :: %(asctime)s :: %(levelname)s :: %(message)s')
-                init_logger(logger, formatter, logFileName)
-                open(pidfile, 'w').write(pid)
-                try:
-                        logger.info("launch server " + argv[0] +" running on " + pidfile)
-                        server(argv)
-                finally:
-                        os.unlink(pidfile)
+        formatter = logging.Formatter('SERVER ' + pid + ' :: %(asctime)s :: %(levelname)s :: %(message)s')
+        init_logger(logger, formatter, logFileName)
+        open(pidfile, 'w').write(pid)
+        try:
+                logger.info("launch server " + argv[0] +" running on " + pidfile)
+                #server(argv)
+                server(1114)
+        finally:
+                os.unlink(pidfile)
 
 if __name__ == "__main__":
         main(sys.argv)
